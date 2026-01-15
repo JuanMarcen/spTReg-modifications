@@ -1,15 +1,12 @@
-# CROSS-VALIDATION
-rm(list = setdiff(ls(),c('conv.trend', 'conv.trend.coastal', 'conv.trend.nofactor',
-                         'kr.conv', 'kr.coastal',
-                         'conv.trend', 'coastal.trend',
-                         'kr.conv.trend', 'kr.coastal.trend')))
+# 10-fold CROSS-VALIDATION
+rm(list = ls())
+
 tau <- 0.5
 
 library(qs)
-df <- qread('df_jun_ag.qs')
-df <- qread('C:/Users/PC/Desktop/Juan/df_jun_ag.qs')
-stations <- readRDS('stations.rds')
-Rcpp::sourceCpp("Metropolis-within-Gibbs/mcmc3.cpp")
+df <- qread('R example/data/df_jun_ag.qs')
+stations <- readRDS('R example/data/stations.rds')
+Rcpp::sourceCpp("C++/mcmc.cpp")
 
 # data preparation
 library(dplyr)
@@ -24,22 +21,23 @@ df <- df %>%
   )
 
 
-# 5-FOLD
-source('metrics_bay.R')
+# fucntions to calcualte R1 (and more)
+source('R example/src/metrics_bay.R')
 library(quantreg)
 
 set.seed(05052002)
+# Folds creation
 stations$group <- sample(rep(1:10, each = 4))
-stations$r <- readRDS('maps coast/r.stations.rds')
+stations$r <- readRDS('R example/data/r.stations.rds')
 
 #R1.CV <- data.frame(matrix(NA, ncol = 1, nrow = 10))
-dist <- readRDS('maps coast/dist.matrix.rds')
-dist_coast <- readRDS('maps coast/dist.vec.rds')
-dist_coast_points <- readRDS('maps coast/dist.coast.points2.rds')
-dmatcoast_conv <- readRDS('maps coast/phimat.rds')
-drmat_conv <- readRDS('maps coast/dr.rds')
-dmatcoast_conv2 <- readRDS('maps coast/phimat.grid.rds')
-coords <- readRDS('coords.stations.rds')
+dist <- readRDS('R example/data/dist.matrix.rds')
+dist_coast <- readRDS('R example/data/dist.vec.rds')
+dist_coast_points <- readRDS('R example/data/dist.coast.points2.rds')
+dmatcoast_conv <- readRDS('R example/data/phimat.rds')
+drmat_conv <- readRDS('R example/data/dr.rds')
+dmatcoast_conv2 <- readRDS('R example/data/phimat.grid.rds')
+coords <- readRDS('R example/data/coords.stations.rds')
 
 cv.fold <- function(j, df, stations, tau, model){
   test <- which(stations$group == j)
@@ -124,7 +122,7 @@ cv.fold <- function(j, df, stations, tau, model){
   nSims <- 10
   nThin <- 1
   nBurnin <- 10
-  nReport <- 10
+  nReport <- 1
   
   #more distances
   dist_coast.train <- dist_coast[train]
@@ -208,7 +206,6 @@ cv.fold <- function(j, df, stations, tau, model){
   
   
   # cambiar para cuando no sea conv !!!! 36 x 4
-  dist_coast_points.comb <- readRDS('maps coast/r.stations.grid.rds')
   dist_coast_points.comb <- abs(outer(stations.train$r, stations.test$r, '-'))
   
   # function for kriging all parameters
@@ -271,7 +268,7 @@ cv.fold <- function(j, df, stations, tau, model){
   
   
   R1 <- R1_bay(pred, 0.50, test.df)
- 
+  
   out <- mean(R1$R1_locales[, 1], na.rm = T) # what I save
   return(list(
     fold = j,
@@ -284,10 +281,14 @@ cv.fold <- function(j, df, stations, tau, model){
   )
 }
 
+
+# COMPUTATION IN PARALLEL
 library(parallel)
 
 ncores <- min(10, detectCores() - 1)
 cl <- makeCluster(ncores)
+
+# Export variables to the clusters
 clusterExport(
   cl,
   varlist = c(
@@ -298,32 +299,40 @@ clusterExport(
   envir = environment()
 )
 
+# Export c++ code and needed libraries to clusters
 clusterEvalQ(cl, {
   library(Rcpp)
-  Rcpp::sourceCpp("Metropolis-within-Gibbs/mcmc3.cpp")
+  Rcpp::sourceCpp("C++/mcmc.cpp")
   library(quantreg)
 })
 
-res1 <- parLapply(cl, 1:10, cv.fold,
-                 df = df,
-                 stations = stations,
-                 tau = tau, 
-                 model = 1)
+# model with no convolution
+res.coastal <- parLapply(cl, 1:10, cv.fold,
+                         df = df,
+                         stations = stations,
+                         tau = tau, 
+                         model = 1)
 
-res2 <- parLapply(cl, 1:10, cv.fold,
-                  df = df,
-                  stations = stations,
-                  tau = tau, 
-                  model = 2)
+# model with convolution
+res.conv <- parLapply(cl, 1:10, cv.fold,
+                      df = df,
+                      stations = stations,
+                      tau = tau, 
+                      model = 2)
 
+# stop the parallelization
 stopCluster(cl)
+
+# results that may be compared
 R1.coastal <- data.frame(
-  R1 = sapply(res1, `[[`, "R1"),
-  row.names = sapply(res1, `[[`, "test_ids")
+  R1 = sapply(res.coastal, `[[`, "R1.mean"),
+  row.names = sapply(res.coastal, `[[`, "test_ids")
 )
 R1.conv <- data.frame(
-  R1 = sapply(res2, `[[`, "R1"),
-  row.names = sapply(res2, `[[`, "test_ids")
+  R1 = sapply(res.conv, `[[`, "R1.mean"),
+  row.names = sapply(res.conv, `[[`, "test_ids")
 )
 
-cv.fold(1, df, stations, 0.50, 1)
+res <- data.frame(conv = R1.conv, coastal = R1.coastal)
+names(res) <- c('R1.conv', 'R1.coastal')
+apply(res, 2, mean)

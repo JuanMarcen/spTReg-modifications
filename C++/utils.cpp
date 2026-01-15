@@ -68,7 +68,7 @@ arma::vec rig(
   arma::vec X(N);
   arma::vec V = arma::square(arma::randn(N)); // chi^2(1)
   arma::vec U = arma::randu(N);               // uniform
-    
+  
   arma::vec C = mu / (2.0 * lambda);
   double mu_i, X_i, W, P1;
   
@@ -81,21 +81,21 @@ arma::vec rig(
       X_i = mu_i * mu_i / X_i;
     X(i) = X_i;
   }
-    
-    return X;
+  
+  return X;
 }
 
 
 // [[Rcpp::export]]
 arma::mat inv_covariance_matrix(
-  const double precision, //hp(0, m)
-  const double decay, //hp(1, m)
-  const double varsigma, //hp(2, m)
-  const double varphi, //hp(3, m)
-  const double cprec, //hp(4, m)
-  const arma::mat& dmat,
-  const arma::vec& dvec,
-  const arma::mat& dmatc
+    const double precision, //hp(0, m)
+    const double decay, //hp(1, m)
+    const double varsigma, //hp(2, m)
+    const double varphi, //hp(3, m)
+    const double cprec, //hp(4, m)
+    const arma::mat& dmat,
+    const arma::vec& dvec,
+    const arma::mat& dmatc
 ){
   // new definition of the covariance matrices
   arma::vec expdc = exp(- varsigma* dvec); //nx1
@@ -104,9 +104,9 @@ arma::mat inv_covariance_matrix(
   Mcoast.each_row() %= expdc.t();
   // row multiplication
   Mcoast.each_col() %= expdc;
-
+  
   arma::mat R = arma::inv_sympd(1.0 / precision * exp(- decay * dmat) + 1.0 / cprec * Mcoast);
-
+  
   return R;
 }
 
@@ -256,7 +256,7 @@ arma::mat inv_mat(
     int model
 ){
   if (model == 1) return(inv_covariance_matrix(precision, decay, varsigma, varphi, cprec,
-                                                 dmat, dvec, dmatc));
+                         dmat, dvec, dmatc));
   if (model == 2) return(inv_conv_covariance_matrix(precision, decay, varsigma, varphi, cprec, 
                          dmat, dmatcoast, dr, lencoast));
 }

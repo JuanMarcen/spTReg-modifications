@@ -12,7 +12,7 @@
 
 // Aux functions
 void reportProgress(int iter, int nBurnin, int nSims, int nReport, int save_idx = 0,
-  std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now());
+                    std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now());
 arma::vec rig(const int N, const arma::vec& mu, const double lambda);
 arma::vec RandomMultiNormalC(const arma::mat& Q, const arma::vec& b);
 arma::mat inv_covariance_matrix(
