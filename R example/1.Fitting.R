@@ -1,11 +1,12 @@
-# documento de pruebas para mis funciones modificadas
-rm(list = setdiff(ls(),c('basura', 'basura.coastal', 'basura.nofactor')))
+# Example of a quantile regression model using convolutions in the coastal covariance matrix
+
 tau <- 0.5
 
 library(qs)
-df <- qread('df_jun_ag.qs')
-df <- qread('C:/Users/PC/Desktop/Juan/df_jun_ag.qs')
-stations <- readRDS('stations.rds')
+# raw data
+df <- qread('R example/data/df_jun_ag.qs')
+# stations data
+stations <- readRDS('R example/data/stations.rds')
 
 # data preparation
 library(dplyr)
@@ -22,19 +23,22 @@ df <- df %>%
 
 # definition of arguments for MCMC function
 Y <- df$Y
-X <- matrix(0, nrow = length(Y), ncol = 0)
-V <- cbind(1, df$s.1, df$c.1, df$g300, df$g500, df$g700, df$`t:month6`, df$`t:month7`, df$`t:month8`)
+X <- matrix(0, nrow = length(Y), ncol = 0) # no fixed effects
+V <- cbind(1, df$s.1, df$c.1, df$g300, df$g500, 
+           df$g700, df$`t:month6`, df$`t:month7`, 
+           df$`t:month8`)
 
-# X_alpha
+# X_alpha (mean of the GP)
 aux.vars <- c('elev', 'dist')
 X_alpha <- list()
 for (i in 1:ncol(V)){
   X_alpha[[i]] <- cbind(1, unique(df$elev), unique(df$dist))
 }
 
-dist <- readRDS('maps coast/dist.matrix.rds')
+# distance between stations
+dist <- readRDS('R example/data/dist.matrix.rds')
 
-#priors
+# priors of parameters and hyperparameters
 M <- matrix(0, nrow = 0, ncol = 1)
 P <- matrix(0, nrow = 0, ncol = 0)
 
@@ -54,7 +58,7 @@ rb <- 24600
 na <- 0.1
 nb <- 0.1
 
-# initial
+# initial valkues of parameters and hyperparameters
 beta <- matrix(0, nrow = 0, ncol = 1)
 alpha <- matrix(0.1, nrow = nrow(stations), ncol = ncol(V))
 prec <- 1
@@ -80,23 +84,31 @@ r <- ncol(V)
 p_alpha <- unlist(lapply(X_alpha, ncol))
 s <- rep(0:39, each = 5888)
 
-nSims <- 10
-nThin <- 1
-nBurnin <- 10
-nReport <- 100
+# number of burning and sampling (as desired)
+# to obtain convergence usually a high number
+nSims <- 100000
+nThin <- 100
+nBurnin <- 100000
+nReport <- 1000
 
-#more distances
-dist_coast <- readRDS('maps coast/dist.vec.rds')
-dist_coast_points <- readRDS('maps coast/dist.coast.points2.rds')
+# more distances
+dist_coast <- readRDS('R example/data/dist.vec.rds')
+dist_coast_points <- readRDS('R example/data/dist.coast.points2.rds')
 
-dmatcoast_conv <- readRDS('maps coast/phimat.rds')
-drmat_conv <- readRDS('maps coast/dr.rds')
+dmatcoast_conv <- readRDS('R example/data/phimat.rds')
+drmat_conv <- readRDS('R example/data/dr.rds')
 lencoast_conv <- drmat_conv[1, 200]
 
 # --- MCMC ---
-Rcpp::sourceCpp("Metropolis-within-Gibbs/mcmc3.cpp")
+# call to C++ code
+Rcpp::sourceCpp("C++/mcmc.cpp")
+
+# model specification: 1 (no convolution) or 2 (convolution)
+model <- 2
+
+# repeat until no error when calculating matrix inverses
 repeat {
-  basura <- try(spQuantileRcpp(
+  conv <- try(spQuantileRcpp(
     tau = tau,
     Y = Y,
     X = X,
@@ -135,15 +147,15 @@ repeat {
     nBurnin = nBurnin,
     nReport = nReport,
     s = s,
-    model = 1
+    model = model
   ),
   silent = TRUE
   )
   
   
   # Si NO dio error → salimos del bucle
-  if (!inherits(basura, "try-error")) {
-    return(basura)
+  if (!inherits(conv, "try-error")) {
+    return(conv)
   }
   
   message("⚠️  Error en spTm() → reintentando...")
@@ -152,53 +164,45 @@ repeat {
   Sys.sleep(0.5)
 }
 
-# traceplots pf GP
+# traceplots of GP
 names <- c('intercept', 's.1', 'c.1', 'g300', 'g500', 'g700', 
            't_month6', 't_month7', 't_month8')
+
+par(mfrow = c(4, 5))
 for (j in 0:8){
-  filename <- paste0('Metropolis-within-Gibbs/trplots/trplots_', names[j +1], '.pdf')
-  pdf(filename, width = 12, height = 15)
-  par(mfrow = c(8, 5))
   for (i in 1:40){
-    plot(basura$process[, i + j * 48], type = 'l', main = paste0(names[j + 1], '(', stations$NAME2[i], ')'))
+    plot(conv$process[, i + j * 48], type = 'l', main = paste0(names[j + 1], '(', stations$NAME2[i], ')'))
   }
-  dev.off()
 }
 
 # traceplots of parameters in GP
+par(mfrow = c(4,2))
 for (i in 0:8){
-  filename <- paste0('Metropolis-within-Gibbs/trplots/hp_trplots_', names[i +1], '.pdf')
-  pdf(filename, width = 7, height = 10)
-  par(mfrow = c(4,2))
-  plot(basura$process[, 41 + i * 48], type = 'l', main = paste0('mu(intercept)_', names[i + 1]))
-  plot(basura$process[, 42 + i * 48], type = 'l', main = paste0('mu(elev)_', names[i + 1]))
-  plot(basura$process[, 43 + i * 48], type = 'l', main = paste0('mu(dist)_', names[i + 1]))
-  plot(basura$process[, 44 + i * 48], type = 'l', main = paste0('1/sigma_k^2_', names[i + 1])) #1/simga_k^2
-  plot(basura$process[, 45 + i * 48], type = 'l', main = paste0('decay_', names[i + 1])) # decay
-  plot(basura$process[, 46 + i * 48], type = 'l', main = paste0('varsgima_', names[i + 1])) # varsigma
-  plot(basura$process[, 47 + i * 48], type = 'l', main = paste0('varphi_', names[i + 1])) #varphi
-  plot(basura$process[, 48 + i * 48], type = 'l', main = paste0('prec.coast_', names[i + 1])) # prec.coast
-  dev.off()
+  plot(conv$process[, 41 + i * 48], type = 'l', main = paste0('mu(intercept)_', names[i + 1]))
+  plot(conv$process[, 42 + i * 48], type = 'l', main = paste0('mu(elev)_', names[i + 1]))
+  plot(conv$process[, 43 + i * 48], type = 'l', main = paste0('mu(dist)_', names[i + 1]))
+  plot(conv$process[, 44 + i * 48], type = 'l', main = paste0('1/sigma_k^2_', names[i + 1])) #1/simga_k^2
+  plot(conv$process[, 45 + i * 48], type = 'l', main = paste0('decay_', names[i + 1])) # decay
+  plot(conv$process[, 46 + i * 48], type = 'l', main = paste0('varsgima_', names[i + 1])) # varsigma
+  plot(conv$process[, 47 + i * 48], type = 'l', main = paste0('varphi_', names[i + 1])) #varphi
+  plot(conv$process[, 48 + i * 48], type = 'l', main = paste0('prec.coast_', names[i + 1])) # prec.coast
 }
 
-############################################################
-# for launching in big computer
-# KRIGING AND MAP
-# chains
-conv <- readRDS('conv.nofactor.q0.50.100k.rds')
-coastal <- readRDS('coastal.q0.50.100k.rds')
+# --- KRIGING AND MAP ---
+# pre fitted model chains with many iterations
+conv <- readRDS('R example/data/conv.trend.q0.50.100k.rds')
 
-# distances
-dmatcoast_conv2 <- readRDS('maps coast/phimat.grid.rds')
-newcoords <- readRDS('grid_km.rds')
-coords <- readRDS('coords.stations.rds')
+# distances for the kriging 
+dmatcoast_conv2 <- readRDS('R example/data/phimat.grid.rds')
+newcoords <- readRDS('R example/data/grid_km.rds')
+coords <- readRDS('R example/data/coords.stations.rds')
 
-dist_coast_points.grid <- readRDS('maps coast/dist.coast.points.grid.rds')
-dist_coast.grid <- readRDS('maps coast/dist.vec.grid.rds')
+dist_coast_points.grid <- readRDS('R example/data/dist.coast.points.grid.rds')
+dist_coast.grid <- readRDS('R example/data/dist.vec.grid.rds')
 
-dist_coast_points.comb <- readRDS('maps coast/r.stations.grid.rds')
+dist_coast_points.comb <- readRDS('R example/data/r.stations.grid.rds')
 
-# function for kriging all parameters
+# function for kriging all GP
 kriging <- function(chain, vars){
   
   out <- list()
@@ -207,11 +211,11 @@ kriging <- function(chain, vars){
     # substract mean of the GP
     w <- chain$process[, 1:40 + i*48]
     Z <- X_alpha[[i + 1]]
-    w.def <- w - t(Z %*% t(basura$process[, 41:43 + i*48]))
+    w.def <- w - t(Z %*% t(chain$process[, 41:43 + i*48]))
     
     out[[vars[i + 1]]] <- krigeBayesRcpp(
       w = w.def,
-      hp = basura$process[ , 44:48 + i*48, drop = FALSE],
+      hp = chain$process[ , 44:48 + i*48, drop = FALSE],
       coords = coords,
       newcoords = newcoords,
       dr = drmat_conv,
@@ -222,7 +226,8 @@ kriging <- function(chain, vars){
       newdvec = dist_coast.grid,
       dmatc = dist_coast_points,
       newdmatc = dist_coast_points.grid,
-      combdmatc = dist_coast_points.comb
+      combdmatc = dist_coast_points.comb,
+      model = model
     )
   }
   
@@ -232,18 +237,19 @@ kriging <- function(chain, vars){
 vars <- c('intercept', 's.1', 'c.1', 'g300', 'g500', 'g700', 
           't_month6', 't_month7', 't_month8')
 
-# change in mcmc3 the method!
+# computation time depends on the length of chains
 kr.conv <- kriging(conv, vars)
-kr.coastal <- kriging(coastal, vars)
 
-# map plots
+# MAP PLOTS
 library(viridis)
 library(ggplot2)
 library(sf)
 library(sp)
-limits <- readRDS('limits.rds')
-background <- readRDS('background.rds')
-grid <- readRDS('grid.rds')
+limits <- readRDS('R example/data/limits.rds')
+background <- readRDS('R example/data/background.rds')
+grid <- readRDS('R example/data/grid.rds')
+
+# stations to st object
 stations <- st_transform(
   as(
     SpatialPointsDataFrame(
@@ -256,6 +262,7 @@ stations <- st_transform(
   2062
 )
 
+# function to plot GP kriging
 plot.gp <- function(kriging, grid, stations, limits, background, var, tau){
   mu <- colMeans(kriging[[var]], na.rm = T)
   
@@ -285,16 +292,12 @@ plot.gp <- function(kriging, grid, stations, limits, background, var, tau){
     coord_sf(xlim = st_coordinates(limits)[, 1], ylim = st_coordinates(limits)[, 2])
 }
 
-# for all vars and save images
+# maps for all GP
+# limits in the scale color may be tocuhed for better images
 for (var in vars){
-  filename <- paste0('Metropolis-within-Gibbs/mapsGP/conv/GP.', var, '.pdf')
   g <- plot.gp(kr.conv, grid, stations, limits, background, var, 0.50)
-  ggsave(filename, g, height = 8, width = 10)
+  print(g)
 }
 
-for (var in vars){
-  filename <- paste0('Metropolis-within-Gibbs/mapsGP/coastal/GP.', var, '.pdf')
-  g <- plot.gp(kr.coastal, grid, stations, limits, background, var, 0.50)
-  ggsave(filename, g, height = 8, width = 10)
-}
+
 
